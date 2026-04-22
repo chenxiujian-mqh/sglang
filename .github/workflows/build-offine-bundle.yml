@@ -27,6 +27,7 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
             apt-get install -y curl wget git build-essential pkg-config libssl-dev python3 python3-pip ca-certificates tar gzip
+
             # === 2. Install Rust ===
             curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
             source "$HOME/.cargo/env"
@@ -34,131 +35,127 @@ jobs:
             rustup toolchain install nightly --profile minimal
             rustup default 1.90.0
 
-          # === 3. Navigate to sgl-model-gateway ===
-          cd sgl-model-gateway
+            # === 3. Navigate to project ===
+            cd sgl-model-gateway
 
-          # Ensure Cargo.lock exists (required for vendor)
-          cargo build --locked
+            # === 关键修复：先更新 Cargo.lock ===
+            cargo update
 
-          # === 4. Vendor all dependencies ===
-          cargo install cargo-vendor
-          cargo vendor > .cargo/config.toml
+            # === 4. 验证构建并生成 lock ===
+            cargo build --locked
 
-          # === 5. Create output directory ===
-          BUNDLE_DIR="/workspace/sgl-model-gateway-offline-bundle"
-          mkdir -p "$BUNDLE_DIR/docs"
+            # === 5. Vendor all dependencies ===
+            cargo install cargo-vendor
+            cargo vendor > .cargo/config.toml
 
-          # === 6. Package Rust toolchains ===
-          tar -czf "$BUNDLE_DIR/rust-toolchain.tar.gz"
-            -C "$HOME/.rustup/toolchains"
-            1.90.0-x86_64-unknown-linux-gnu
-            nightly-x86_64-unknown-linux-gnu
+            # === 6. Create output directory ===
+            BUNDLE_DIR="/workspace/sgl-model-gateway-offline-bundle"
+            mkdir -p "$BUNDLE_DIR/docs"
 
-          # === 7. Package vendor dependencies ===
-          tar -czf "$BUNDLE_DIR/cargo-vendor.tar.gz"
-            -C "$PWD" vendor
+            # === 7. Package Rust toolchains ===
+            tar -czf "$BUNDLE_DIR/rust-toolchain.tar.gz" \
+              -C "$HOME/.rustup/toolchains" \
+              1.90.0-x86_64-unknown-linux-gnu \
+              nightly-x86_64-unknown-linux-gnu
 
-          # === 8. Package project source (including .cargo/config.toml) ===
-          tar -czf "$BUNDLE_DIR/sgl-model-gateway-src.tar.gz"
-            -C "$PWD"
-            src Cargo.toml Cargo.lock .cargo
+            # === 8. Package vendor dependencies ===
+            tar -czf "$BUNDLE_DIR/cargo-vendor.tar.gz" \
+              -C "$PWD" vendor
 
-          # === 9. Create documentation ===
-          cat > "$BUNDLE_DIR/README.md" <<EOF
-          # sgl-model-gateway Offline Deployment Bundle
+            # === 9. Package project source (including .cargo/config.toml) ===
+            tar -czf "$BUNDLE_DIR/sgl-model-gateway-src.tar.gz" \
+              -C "$PWD" \
+              src Cargo.toml Cargo.lock .cargo
 
-          This bundle contains everything needed to build and run sgl-model-gateway on an air-gapped Ubuntu 20.04 machine.
+            # === 10. Create documentation ===
+            cat > "$BUNDLE_DIR/README.md" <<EOF
+            # sgl-model-gateway Offline Deployment Bundle
+            This bundle contains everything needed to build and run sgl-model-gateway on an air-gapped Ubuntu 20.04 machine.
+            ## Contents
+            - rust-toolchain.tar.gz: Rust 1.90.0 + nightly
+            - cargo-vendor.tar.gz: All Rust crate sources
+            - sgl-model-gateway-src.tar.gz: Project source code
+            - setup-offline.sh: One-click setup script
+            Run ./setup-offline.sh to deploy.
+            EOF
 
-          ## Contents
-          - rust-toolchain.tar.gz: Rust 1.90.0 + nightly
-          - cargo-vendor.tar.gz: All Rust crate sources
-          - sgl-model-gateway-src.tar.gz: Project source code
-          - setup-offline.sh: One-click setup script
+            cat > "$BUNDLE_DIR/docs/environment-requirements.md" <<EOF
+            ## Environment Requirements
+            - OS: Ubuntu 20.04 LTS (Focal Fossa)
+            - Architecture: x86_64
+            - GLIBC: >= 2.31
+            - Disk space: ~1GB free
+            - No internet required after unpacking
+            EOF
 
-          Run ./setup-offline.sh to deploy.
-          EOF
+            cat > "$BUNDLE_DIR/docs/how-to-deploy.md" <<EOF
+            ## How to Deploy
+            1. Copy this entire folder to your Ubuntu 20.04 machine.
+            2. Run:
+               chmod +x setup-offline.sh
+               ./setup-offline.sh
+            3. The binary will be built in target/release/sgl-model-gateway.
+            EOF
 
-          cat > "$BUNDLE_DIR/docs/environment-requirements.md" <<EOF
-          ## Environment Requirements
-          - OS: Ubuntu 20.04 LTS (Focal Fossa)
-          - Architecture: x86_64
-          - GLIBC: >= 2.31
-          - Disk space: ~1GB free
-          - No internet required after unpacking
-          EOF
+            # === 11. Create setup script ===
+            cat > "$BUNDLE_DIR/setup-offline.sh" <<'"'"'SETUP_SCRIPT'"'"'
+            #!/bin/bash
+            set -e
+            echo "Setting up sgl-model-gateway offline environment..."
 
-          cat > "$BUNDLE_DIR/docs/how-to-deploy.md" <<EOF
-          ## How to Deploy
-
-          1. Copy this entire folder to your Ubuntu 20.04 machine.
-          2. Run:
-             chmod +x setup-offline.sh
-             ./setup-offline.sh
-          3. The binary will be built in target/release/sgl-model-gateway.
-          EOF
-
-          # === 10. Create setup script ===
-          cat > "$BUNDLE_DIR/setup-offline.sh" <<'"'"'SETUP_SCRIPT'"'"'
-          #!/bin/bash
-          set -e
-
-          echo "Setting up sgl-model-gateway offline environment..."
-
-          # Detect OS
-          if [ "$(lsb_release -rs)" != "20.04" ]; then
-            echo "Warning: This bundle is designed for Ubuntu 20.04. You are running $(lsb_release -d)."
-            read -p "Continue anyway? (y/N): " -n 1 -r
-            echo
-            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-              exit 1
+            # Detect OS
+            if [ "$(lsb_release -rs 2>/dev/null || echo unknown)" != "20.04" ]; then
+              echo "Warning: This bundle is designed for Ubuntu 20.04. You are running $(lsb_release -d 2>/dev/null || echo 'Unknown OS')."
+              read -p "Continue anyway? (y/N): " -n 1 -r
+              echo
+              if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                exit 1
+              fi
             fi
-          fi
 
-          # Install system deps (safe to run multiple times)
-          sudo apt-get update || true
-          sudo apt-get install -y build-essential pkg-config libssl-dev
+            # Install system deps
+            sudo apt-get update || true
+            sudo apt-get install -y build-essential pkg-config libssl-dev
 
-          # Extract Rust toolchain
-          echo "Extracting Rust toolchain..."
-          mkdir -p "$HOME/.rustup/toolchains"
-          tar -xzf rust-toolchain.tar.gz -C "$HOME/.rustup/toolchains"
+            # Extract Rust toolchain
+            echo "Extracting Rust toolchain..."
+            mkdir -p "$HOME/.rustup/toolchains"
+            tar -xzf rust-toolchain.tar.gz -C "$HOME/.rustup/toolchains"
 
-          # Set up rustup stub
-          cat > "$HOME/.cargo/bin/rustup" <<'"'"'RUSTUP_STUB'"'"'
-          #!/bin/bash
-          TOOLCHAIN="1.90.0-x86_64-unknown-linux-gnu"
-          exec "$HOME/.rustup/toolchains/$TOOLCHAIN/bin/rustc" "$@"
-          RUSTUP_STUB
-          chmod +x "$HOME/.cargo/bin/rustup"
-          mkdir -p "$HOME/.cargo/bin"
-          ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/cargo" "$HOME/.cargo/bin/cargo"
-          ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/rustc" "$HOME/.cargo/bin/rustc"
+            # Set up rustup stub
+            mkdir -p "$HOME/.cargo/bin"
+            cat > "$HOME/.cargo/bin/rustup" <<'"'"'RUSTUP_STUB'"'"'
+            #!/bin/bash
+            TOOLCHAIN="1.90.0-x86_64-unknown-linux-gnu"
+            exec "$HOME/.rustup/toolchains/$TOOLCHAIN/bin/rustc" "$@"
+            RUSTUP_STUB
+            chmod +x "$HOME/.cargo/bin/rustup"
 
-          # Add to PATH if not already
-          if ! grep -q ".cargo/bin" ~/.bashrc; then
-            echo '"'"'export PATH="$HOME/.cargo/bin:$PATH"'"'"' >> ~/.bashrc
-          fi
-          export PATH="$HOME/.cargo/bin:$PATH"
+            ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/cargo" "$HOME/.cargo/bin/cargo"
+            ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/rustc" "$HOME/.cargo/bin/rustc"
 
-          # Extract project
-          echo "Extracting project source..."
-          mkdir -p sgl-model-gateway
-          tar -xzf sgl-model-gateway-src.tar.gz -C sgl-model-gateway
-          tar -xzf cargo-vendor.tar.gz -C sgl-model-gateway
+            # Add to PATH if not already
+            if ! grep -q ".cargo/bin" ~/.bashrc 2>/dev/null; then
+              echo '"'"'export PATH="$HOME/.cargo/bin:$PATH"'"'"' >> ~/.bashrc
+            fi
+            export PATH="$HOME/.cargo/bin:$PATH"
 
-          # Build!
-          echo "Building sgl-model-gateway..."
-          cd sgl-model-gateway
-          cargo build --release --locked
+            # Extract project
+            echo "Extracting project source..."
+            mkdir -p sgl-model-gateway
+            tar -xzf sgl-model-gateway-src.tar.gz -C sgl-model-gateway
+            tar -xzf cargo-vendor.tar.gz -C sgl-model-gateway
 
-          echo "Done! Binary at: target/release/sgl-model-gateway"
-          echo "To run: ./target/release/sgl-model-gateway [args]"
-          SETUP_SCRIPT
-
-          chmod +x "$BUNDLE_DIR/setup-offline.sh"
-
-          echo "Offline bundle created at: $BUNDLE_DIR"
-          '
+            # Build!
+            echo "Building sgl-model-gateway..."
+            cd sgl-model-gateway
+            cargo build --release --offline
+            echo "Done! Binary at: target/release/sgl-model-gateway"
+            echo "To run: ./target/release/sgl-model-gateway [args]"
+            SETUP_SCRIPT
+            chmod +x "$BUNDLE_DIR/setup-offline.sh"
+            echo "Offline bundle created at: $BUNDLE_DIR"
+            '
 
       - name: Upload offline bundle as artifact
         uses: actions/upload-artifact@v4
