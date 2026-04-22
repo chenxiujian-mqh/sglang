@@ -219,12 +219,7 @@ jobs:
   
       - name: Build and run Ubuntu 20.04 container to prepare offline bundle  
         run: |  
-          docker run --rm \  
-            -v "$PWD:/workspace" \  
-            -v "/tmp/build-bundle.sh:/build-bundle.sh" \  
-            -w /workspace \  
-            ubuntu:20.04 \  
-            bash /build-bundle.sh  
+          docker run --rm -v "$PWD:/workspace" -v "/tmp/build-bundle.sh:/build-bundle.sh" -w /workspace ubuntu:20.04 bash /build-bundle.sh
   
       - name: Upload offline bundle as artifact  
         uses: actions/upload-artifact@v4  
