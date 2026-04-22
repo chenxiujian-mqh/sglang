@@ -1,0 +1,188 @@
+name: Quick Verify - From rust-analyzer Fix  
+  
+on:  
+  workflow_dispatch:  
+  
+jobs:  
+  quick-verify:  
+    runs-on: ubuntu-latest  
+  
+    steps:  
+      - name: Checkout code  
+        uses: actions/checkout@v4  
+  
+      - name: Write verify script  
+        run: |  
+          cat > /tmp/verify-bundle.sh << 'OUTER_EOF'  
+          #!/bin/bash  
+          set -e  
+          export DEBIAN_FRONTEND=noninteractive  
+          apt-get update  
+          apt-get install -y curl ca-certificates tar gzip build-essential pkg-config libssl-dev  
+  
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal  
+          source "$HOME/.cargo/env"  
+          rustup toolchain install 1.90.0 --profile minimal  
+          rustup toolchain install nightly --profile minimal  
+          rustup default 1.90.0  
+  
+          # === 从报错位置开始验证 ===  
+          rustup component add rust-analyzer --toolchain 1.90.0  
+  
+          cd sgl-model-gateway  
+          mkdir -p vendor  
+          mkdir -p .cargo  
+          if [ -f .cargo/config.toml ]; then  
+            cp .cargo/config.toml .cargo/config.toml.bak  
+          fi  
+          cat >> .cargo/config.toml << 'EOF'  
+          [source.crates-io]  
+          replace-with = "vendored-sources"  
+  
+          [source.vendored-sources]  
+          directory = "vendor"  
+          EOF  
+  
+          cargo install cargo-watch --locked  
+  
+          BUNDLE_DIR="/workspace/sgl-model-gateway-offline-bundle"  
+          mkdir -p "$BUNDLE_DIR/docs"  
+  
+          tar -czf "$BUNDLE_DIR/rust-toolchain.tar.gz" -C "$HOME/.rustup/toolchains" 1.90.0-x86_64-unknown-linux-gnu nightly-x86_64-unknown-linux-gnu  
+  
+          tar -czf "$BUNDLE_DIR/cargo-vendor.tar.gz" -C "$PWD" vendor  
+  
+          SRC_FILES="src Cargo.toml Cargo.lock .cargo"  
+          if [ -d "proto" ]; then  
+            SRC_FILES="$SRC_FILES proto"  
+          fi  
+          tar -czf "$BUNDLE_DIR/sgl-model-gateway-src.tar.gz" -C "$PWD" $SRC_FILES  
+  
+          tar -czf "$BUNDLE_DIR/cargo-dev-tools.tar.gz" -C "$HOME/.cargo/bin" cargo-watch  
+  
+          cat > "$BUNDLE_DIR/README.md" << 'EOF'  
+          # sgl-model-gateway Offline Development Bundle  
+          Contents:  
+          - rust-toolchain.tar.gz: Rust 1.90.0 + nightly (includes rust-analyzer)  
+          - cargo-vendor.tar.gz: All Rust crate sources  
+          - sgl-model-gateway-src.tar.gz: Project source code  
+          - cargo-dev-tools.tar.gz: cargo-watch  
+          - setup-offline.sh: Production build  
+          - setup-dev.sh: Development environment  
+          EOF  
+  
+          cat > "$BUNDLE_DIR/docs/environment-requirements.md" << 'EOF'  
+          ## Environment Requirements  
+          - OS: Ubuntu 20.04 LTS (Focal Fossa)  
+          - Architecture: x86_64  
+          - GLIBC: >= 2.31  
+          - Disk space: ~2GB free  
+          - No internet required after unpacking  
+          EOF  
+  
+          cat > "$BUNDLE_DIR/docs/how-to-deploy.md" << 'EOF'  
+          ## How to Deploy  
+          ### Production Build  
+            chmod +x setup-offline.sh && ./setup-offline.sh  
+          ### Development  
+            chmod +x setup-dev.sh && ./setup-dev.sh  
+          EOF  
+  
+          cat > "$BUNDLE_DIR/setup-offline.sh" << 'SETUP_EOF'  
+          #!/bin/bash  
+          set -e  
+          echo "Setting up sgl-model-gateway offline environment..."  
+  
+          if [ "$(lsb_release -rs 2>/dev/null || echo unknown)" != "20.04" ]; then  
+            echo "Warning: This bundle is designed for Ubuntu 20.04."  
+            read -p "Continue anyway? (y/N): " -n 1 -r  
+            echo  
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then  
+              exit 1  
+            fi  
+          fi  
+  
+          sudo apt-get update || true  
+          sudo apt-get install -y build-essential pkg-config libssl-dev gcc-10 g++-10 perl cmake  
+  
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100  
+          update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100  
+          export CC=gcc-10  
+          export CXX=g++-10  
+  
+          echo "Extracting Rust toolchain..."  
+          mkdir -p "$HOME/.rustup/toolchains"  
+          tar -xzf rust-toolchain.tar.gz -C "$HOME/.rustup/toolchains"  
+  
+          mkdir -p "$HOME/.cargo/bin"  
+  
+          cat > "$HOME/.cargo/bin/rustup" << 'RUSTUP_EOF'  
+          #!/bin/bash  
+          if [ "$1" = "run" ] && [ "$2" = "nightly" ]; then  
+            shift 2  
+            CMD="$1"; shift  
+            exec "$HOME/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/$CMD" "$@"  
+          fi  
+          TOOLCHAIN="1.90.0-x86_64-unknown-linux-gnu"  
+          CMD="$1"; shift  
+          exec "$HOME/.rustup/toolchains/$TOOLCHAIN/bin/$CMD" "$@"  
+          RUSTUP_EOF  
+          chmod +x "$HOME/.cargo/bin/rustup"  
+  
+          ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/cargo" "$HOME/.cargo/bin/cargo"  
+          ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/rustc" "$HOME/.cargo/bin/rustc"  
+  
+          if ! grep -q ".cargo/bin" ~/.bashrc 2>/dev/null; then  
+            echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc  
+          fi  
+          export PATH="$HOME/.cargo/bin:$PATH"  
+  
+          echo "Extracting project source..."  
+          mkdir -p sgl-model-gateway  
+          tar -xzf sgl-model-gateway-src.tar.gz -C sgl-model-gateway  
+          tar -xzf cargo-vendor.tar.gz -C sgl-model-gateway  
+  
+          echo "Building sgl-model-gateway..."  
+          cd sgl-model-gateway  
+          cargo build --release --offline --features vendored-openssl  
+          echo "Done! Binary at: target/release/sgl-model-gateway"  
+          SETUP_EOF  
+  
+          cat > "$BUNDLE_DIR/setup-dev.sh" << 'DEV_EOF'  
+          #!/bin/bash  
+          set -e  
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  
+          cd "$SCRIPT_DIR"  
+          ./setup-offline.sh  
+  
+          echo "Extracting development tools..."  
+          mkdir -p "$HOME/.cargo/bin"  
+          tar -xzf cargo-dev-tools.tar.gz -C "$HOME/.cargo/bin"  
+          chmod +x "$HOME/.cargo/bin/cargo-watch"  
+  
+          ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/rust-analyzer" "$HOME/.cargo/bin/rust-analyzer"  
+  
+          echo ""  
+          echo "Development environment ready!"  
+          echo "  cargo run --offline -- --help        # Run with dev profile"  
+          echo "  cargo build --offline                # Build with dev profile"  
+          echo "  cargo watch -x 'run --offline'       # Auto-rebuild on changes"  
+          echo "  rust-analyzer                        # Start LSP server"  
+          DEV_EOF  
+  
+          chmod +x "$BUNDLE_DIR/setup-offline.sh"  
+          chmod +x "$BUNDLE_DIR/setup-dev.sh"  
+          echo "Verify complete. Bundle contents:"  
+          ls -lh "$BUNDLE_DIR/"  
+          OUTER_EOF  
+          chmod +x /tmp/verify-bundle.sh  
+  
+      - name: Run verify in Ubuntu 20.04 container  
+        run: docker run --rm -v "$PWD:/workspace" -v "/tmp/verify-bundle.sh:/verify-bundle.sh" -w /workspace ubuntu:20.04 bash /verify-bundle.sh  
+  
+      - name: Upload artifact  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: sgl-model-gateway-offline-bundle-verify  
+          path: sgl-model-gateway-offline-bundle/  
+          retention-days: 1
