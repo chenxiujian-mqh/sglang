@@ -19,11 +19,7 @@ jobs:
       - name: Build full offline dev bundle in Ubuntu 20.04 container  
         run: |  
           chmod +x sgl-model-gateway/scripts/build-offline-bundle.sh  
-          docker run --rm \  
-            -v "$PWD:/workspace" \  
-            -w /workspace \  
-            ubuntu:20.04 \  
-            bash sgl-model-gateway/scripts/build-offline-bundle.sh  
+          docker run --rm -v "${PWD}:/workspace" -w /workspace ubuntu:20.04 bash sgl-model-gateway/scripts/build-offline-bundle.sh  
   
       - name: Upload offline dev bundle as artifact  
         uses: actions/upload-artifact@v4  
