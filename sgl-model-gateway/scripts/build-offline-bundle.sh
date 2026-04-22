@@ -1,12 +1,18 @@
-#!/bin/bash  
+  #!/bin/bash  
 set -e  
 export DEBIAN_FRONTEND=noninteractive  
+  
+# 启用 universe 仓库（ubuntu:20.04 镜像默认不包含）  
+sed -i 's/focal main restricted/focal main restricted universe/g' /etc/apt/sources.list  
+sed -i 's/focal-updates main restricted/focal-updates main restricted universe/g' /etc/apt/sources.list  
+sed -i 's/focal-security main restricted/focal-security main restricted universe/g' /etc/apt/sources.list  
+  
 apt-get update  
   
 # === 1. 安装系统依赖 ===  
 apt-get install -y curl wget git build-essential pkg-config libssl-dev \  
   python3 python3-pip ca-certificates tar gzip unzip \  
-  gcc-10 g++-10 protobuf-compiler  
+  gcc-10 g++-10 protobuf-compiler
   
 # === 2. 安装新版 protoc ===  
 PROTOC_VERSION=3.20.1  
