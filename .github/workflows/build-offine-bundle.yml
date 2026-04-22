@@ -27,11 +27,13 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
 
-            # === 关键修复：安装 gcc-10 替代默认 gcc-9 ===
+            # === 安装系统依赖（含 gcc-10 和 protoc）===
             apt-get install -y curl wget git build-essential pkg-config libssl-dev \
               python3 python3-pip ca-certificates tar gzip \
-              gcc-10 g++-10
+              gcc-10 g++-10 \
+              protobuf-compiler
 
+            # 设置 gcc-10 为默认
             update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
             update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
             export CC=gcc-10
@@ -57,26 +59,26 @@ jobs:
             cargo install cargo-vendor
             cargo vendor > .cargo/config.toml
 
-            # === 6. Create output directory ===
+            # === 7. Create output directory ===
             BUNDLE_DIR="/workspace/sgl-model-gateway-offline-bundle"
             mkdir -p "$BUNDLE_DIR/docs"
 
-            # === 7. Package Rust toolchains ===
+            # === 8. Package Rust toolchains ===
             tar -czf "$BUNDLE_DIR/rust-toolchain.tar.gz" \
               -C "$HOME/.rustup/toolchains" \
               1.90.0-x86_64-unknown-linux-gnu \
               nightly-x86_64-unknown-linux-gnu
 
-            # === 8. Package vendor dependencies ===
+            # === 9. Package vendor dependencies ===
             tar -czf "$BUNDLE_DIR/cargo-vendor.tar.gz" \
               -C "$PWD" vendor
 
-            # === 9. Package project source (including .cargo/config.toml) ===
+            # === 10. Package project source ===
             tar -czf "$BUNDLE_DIR/sgl-model-gateway-src.tar.gz" \
               -C "$PWD" \
-              src Cargo.toml Cargo.lock .cargo
+              src Cargo.toml Cargo.lock .cargo proto  # 注意：加上 proto 目录
 
-            # === 10. Create documentation ===
+            # === 11. Create documentation ===
             cat > "$BUNDLE_DIR/README.md" <<EOF
             # sgl-model-gateway Offline Deployment Bundle
             This bundle contains everything needed to build and run sgl-model-gateway on an air-gapped Ubuntu 20.04 machine.
@@ -106,7 +108,7 @@ jobs:
             3. The binary will be built in target/release/sgl-model-gateway.
             EOF
 
-            # === 11. Create setup script ===
+            # === 12. Create setup script ===
             cat > "$BUNDLE_DIR/setup-offline.sh" <<'"'"'SETUP_SCRIPT'"'"'
             #!/bin/bash
             set -e
@@ -122,9 +124,15 @@ jobs:
               fi
             fi
 
-            # Install system deps
+            # Install system deps（离线环境需要 protobuf-compiler）
             sudo apt-get update || true
-            sudo apt-get install -y build-essential pkg-config libssl-dev
+            sudo apt-get install -y build-essential pkg-config libssl-dev \
+              gcc-10 g++-10 protobuf-compiler
+
+            update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
+            update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
+            export CC=gcc-10
+            export CXX=g++-10
 
             # Extract Rust toolchain
             echo "Extracting Rust toolchain..."
