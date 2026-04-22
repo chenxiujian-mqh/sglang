@@ -1,0 +1,261 @@
+name: Build Full Offline Dev Bundle for sgl-model-gateway  
+  
+on:  
+  workflow_dispatch:  # 手动触发  
+  
+jobs:  
+  build-offline-bundle:  
+    runs-on: ubuntu-latest  
+  
+    steps:  
+      - name: Checkout code  
+        uses: actions/checkout@v4  
+  
+      - name: Set up Docker  
+        run: |  
+          sudo systemctl start docker  
+          docker --version  
+  
+      - name: Build and run Ubuntu 20.04 container to prepare offline bundle  
+        run: |  
+          docker run --rm \  
+            -v "$PWD:/workspace" \  
+            -w /workspace \  
+            ubuntu:20.04 \  
+            bash -c '  
+            set -e  
+            export DEBIAN_FRONTEND=noninteractive  
+            apt-get update  
+  
+            # === 安装系统依赖（含 perl，用于 vendored-openssl）===  
+            apt-get install -y curl wget git build-essential pkg-config libssl-dev \  
+              python3 python3-pip ca-certificates tar gzip unzip \  
+              gcc-10 g++-10 perl cmake  
+  
+            # === 安装新版 protoc ===  
+            PROTOC_VERSION=3.20.1  
+            curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip  
+            unzip protoc-${PROTOC_VERSION}-linux-x86_64.zip -d /usr/local  
+            rm protoc-${PROTOC_VERSION}-linux-x86_64.zip  
+            export PATH="/usr/local/bin:$PATH"  
+            protoc --version  
+  
+            # 设置 gcc-10  
+            update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100  
+            update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100  
+            export CC=gcc-10  
+            export CXX=g++-10  
+  
+            # === 2. Install Rust ===  
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal  
+            source "$HOME/.cargo/env"  
+            rustup toolchain install 1.90.0 --profile minimal  
+            rustup toolchain install nightly --profile minimal  
+            rustup default 1.90.0  
+  
+            # === 3. Navigate to project ===  
+            cd sgl-model-gateway  
+  
+            # === 4. 更新 lock 文件 ===  
+            cargo update  
+  
+            # === 5. 验证构建（使用 vendored-openssl）===  
+            cargo build --locked --features vendored-openssl  
+  
+            # === 6. Vendor（保留原有配置）===  
+            mkdir -p .cargo  
+            # 备份原有配置  
+            if [ -f .cargo/config.toml ]; then  
+              cp .cargo/config.toml .cargo/config.toml.bak  
+            fi  
+            # 追加 vendor 配置而不是覆盖  
+            cargo vendor >> .cargo/config.toml 2>/dev/null || {  
+              echo "Vendor output:"  
+              cat .cargo/config.toml  
+            }  
+  
+            # === 7. 安装开发工具 ===  
+            cargo install rust-analyzer --locked  
+            cargo install cargo-watch --locked  
+  
+            # === 8. Create output directory ===  
+            BUNDLE_DIR="/workspace/sgl-model-gateway-offline-bundle"  
+            mkdir -p "$BUNDLE_DIR/docs"  
+  
+            # === 9. Package Rust toolchains ===  
+            tar -czf "$BUNDLE_DIR/rust-toolchain.tar.gz" \  
+              -C "$HOME/.rustup/toolchains" \  
+              1.90.0-x86_64-unknown-linux-gnu \  
+              nightly-x86_64-unknown-linux-gnu  
+  
+            # === 10. Package vendor dependencies ===  
+            tar -czf "$BUNDLE_DIR/cargo-vendor.tar.gz" \  
+              -C "$PWD" vendor  
+  
+            # === 11. Package project source（动态包含 proto）===  
+            SRC_FILES="src Cargo.toml Cargo.lock .cargo"  
+            if [ -d "proto" ]; then  
+              SRC_FILES="$SRC_FILES proto"  
+            fi  
+              
+            tar -czf "$BUNDLE_DIR/sgl-model-gateway-src.tar.gz" \  
+              -C "$PWD" \  
+              $SRC_FILES  
+  
+            # === 12. Package dev tools ===  
+            mkdir -p "$HOME/.cargo/bin"  
+            tar -czf "$BUNDLE_DIR/cargo-dev-tools.tar.gz" \  
+              -C "$HOME/.cargo/bin" \  
+              rust-analyzer cargo-watch  
+  
+            # === 13. Create documentation ===  
+            cat > "$BUNDLE_DIR/README.md" <<EOF  
+            # sgl-model-gateway Offline Development Bundle  
+            This bundle contains everything needed to develop and build sgl-model-gateway on an air-gapped Ubuntu 20.04 machine.  
+            ## Contents  
+            - rust-toolchain.tar.gz: Rust 1.90.0 + nightly  
+            - cargo-vendor.tar.gz: All Rust crate sources  
+            - sgl-model-gateway-src.tar.gz: Project source code  
+            - cargo-dev-tools.tar.gz: rust-analyzer, cargo-watch  
+            - setup-offline.sh: One-click setup script  
+            - setup-dev.sh: Development environment setup  
+            Run ./setup-offline.sh for production build or ./setup-dev.sh for development.  
+            EOF  
+  
+            cat > "$BUNDLE_DIR/docs/environment-requirements.md" <<EOF  
+            ## Environment Requirements  
+            - OS: Ubuntu 20.04 LTS (Focal Fossa)  
+            - Architecture: x86_64  
+            - GLIBC: >= 2.31  
+            - Disk space: ~2GB free  
+            - No internet required after unpacking  
+            EOF  
+  
+            cat > "$BUNDLE_DIR/docs/how-to-deploy.md" <<EOF  
+            ## How to Deploy  
+            ### Production Build  
+            1. Copy this entire folder to your Ubuntu 20.04 machine.  
+            2. Run:  
+               chmod +x setup-offline.sh  
+               ./setup-offline.sh  
+            3. The binary will be built in target/release/sgl-model-gateway.  
+              
+            ### Development  
+            1. Run:  
+               chmod +x setup-dev.sh  
+               ./setup-dev.sh  
+            2. Use `cargo run --offline` for quick iteration  
+            3. Use `rust-analyzer` for IDE support  
+            EOF  
+  
+            # === 14. Create setup scripts ===  
+            # Production setup script  
+            cat > "$BUNDLE_DIR/setup-offline.sh" <<'"'"'SETUP_SCRIPT'"'"'  
+            #!/bin/bash  
+            set -e  
+            echo "Setting up sgl-model-gateway offline environment..."  
+  
+            # Detect OS  
+            if [ "$(lsb_release -rs 2>/dev/null || echo unknown)" != "20.04" ]; then  
+              echo "Warning: This bundle is designed for Ubuntu 20.04. You are running $(lsb_release -d 2>/dev/null || echo 'Unknown OS')."  
+              read -p "Continue anyway? (y/N): " -n 1 -r  
+              echo  
+              if [[ ! $REPLY =~ ^[Yy]$ ]]; then  
+                exit 1  
+              fi  
+            fi  
+  
+            # Install system deps（离线环境需要 protobuf-compiler）  
+            sudo apt-get update || true  
+            sudo apt-get install -y build-essential pkg-config libssl-dev \  
+              gcc-10 g++-10 protobuf-compiler perl cmake  
+  
+            update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100  
+            update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100  
+            export CC=gcc-10  
+            export CXX=g++-10  
+  
+            # Extract Rust toolchain  
+            echo "Extracting Rust toolchain..."  
+            mkdir -p "$HOME/.rustup/toolchains"  
+            tar -xzf rust-toolchain.tar.gz -C "$HOME/.rustup/toolchains"  
+  
+            # Set up proper rustup  
+            mkdir -p "$HOME/.cargo/bin"  
+            cat > "$HOME/.cargo/bin/rustup" <<'"'"'RUSTUP_REAL'"'"'  
+            #!/bin/bash  
+            TOOLCHAIN="1.90.0-x86_64-unknown-linux-gnu"  
+            if [ "\$1" = "run" ]; then  
+              shift  
+              if [ "\$1" = "nightly" ]; then  
+                shift  
+                exec "\$HOME/.rustup/toolchains/nightly-x86_64-unknown-linux-gnu/bin/\$2" "\${@:3}"  
+              fi  
+            fi  
+            exec "\$HOME/.rustup/toolchains/\$TOOLCHAIN/bin/\$1" "\${@:2}"  
+            RUSTUP_REAL  
+            chmod +x "$HOME/.cargo/bin/rustup"  
+  
+            ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/cargo" "$HOME/.cargo/bin/cargo"  
+            ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/rustc" "$HOME/.cargo/bin/rustc"  
+  
+            # Add to PATH if not already  
+            if ! grep -q ".cargo/bin" ~/.bashrc 2>/dev/null; then  
+              echo '"'"'export PATH="$HOME/.cargo/bin:$PATH"'"'"' >> ~/.bashrc  
+            fi  
+            export PATH="$HOME/.cargo/bin:$PATH"  
+  
+            # Extract project  
+            echo "Extracting project source..."  
+            mkdir -p sgl-model-gateway  
+            tar -xzf sgl-model-gateway-src.tar.gz -C sgl-model-gateway  
+            tar -xzf cargo-vendor.tar.gz -C sgl-model-gateway  
+  
+            # Build!  
+            echo "Building sgl-model-gateway..."  
+            cd sgl-model-gateway  
+            cargo build --release --offline --features vendored-openssl  
+            echo "Done! Binary at: target/release/sgl-model-gateway"  
+            echo "To run: ./target/release/sgl-model-gateway [args]"  
+            SETUP_SCRIPT  
+  
+            # Development setup script  
+            cat > "$BUNDLE_DIR/setup-dev.sh" <<'"'"'DEV_SCRIPT'"'"'  
+            #!/bin/bash  
+            set -e  
+            echo "Setting up sgl-model-gateway development environment..."  
+  
+            # Run base setup  
+            ./setup-offline.sh  
+  
+            # Extract dev tools  
+            echo "Extracting development tools..."  
+            mkdir -p "$HOME/.cargo/bin"  
+            tar -xzf cargo-dev-tools.tar.gz -C "$HOME/.cargo/bin"  
+            chmod +x "$HOME/.cargo/bin/rust-analyzer"  
+            chmod +x "$HOME/.cargo/bin/cargo-watch"  
+  
+            cd sgl-model-gateway  
+            echo ""  
+            echo "Development environment ready!"  
+            echo ""  
+            echo "Quick commands:"  
+            echo "  cargo run --offline -- --help                    # Run with dev profile"  
+            echo "  cargo build --offline                            # Build with dev profile"  
+            echo "  cargo watch -x run --offline -- --help           # Auto-rebuild on changes"  
+            echo "  rust-analyzer                                    # Start LSP server"  
+            echo "  make fmt                                         # Format code"  
+            echo ""  
+            DEV_SCRIPT  
+  
+            chmod +x "$BUNDLE_DIR/setup-offline.sh"  
+            chmod +x "$BUNDLE_DIR/setup-dev.sh"  
+            echo "Offline bundle created at: $BUNDLE_DIR"  
+            '  
+  
+      - name: Upload offline bundle as artifact  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: sgl-model-gateway-offline-bundle  
+          path: sgl-model-gateway-offline-bundle/  
+          retention-days: 7
