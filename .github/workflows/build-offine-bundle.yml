@@ -17,29 +17,22 @@ jobs:
           docker --version
 
       - name: Build and run Ubuntu 20.04 container to prepare offline bundle
-        run: >
-          docker run --rm
-          -v "$PWD:/workspace"
-          -w /workspace
-          ubuntu:20.04
-          bash -c '
-          set -e
-
-          # === 1. Install system dependencies ===
-          export DEBIAN_FRONTEND=noninteractive
-          apt-get update
-          apt-get install -y
-            curl wget git build-essential pkg-config libssl-dev
-            python3 python3-pip ca-certificates tar gzip
-
-          # === 2. Install Rust (minimal profile) ===
-          curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
-          source "$HOME/.cargo/env"
-
-          # Install specific toolchains
-          rustup toolchain install 1.90.0 --profile minimal
-          rustup toolchain install nightly --profile minimal
-          rustup default 1.90.0
+        run: |
+          docker run --rm \
+            -v "$PWD:/workspace" \
+            -w /workspace \
+            ubuntu:20.04 \
+            bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y curl wget git build-essential pkg-config libssl-dev python3 python3-pip ca-certificates tar gzip
+            # === 2. Install Rust ===
+            curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
+            source "$HOME/.cargo/env"
+            rustup toolchain install 1.90.0 --profile minimal
+            rustup toolchain install nightly --profile minimal
+            rustup default 1.90.0
 
           # === 3. Navigate to sgl-model-gateway ===
           cd sgl-model-gateway
