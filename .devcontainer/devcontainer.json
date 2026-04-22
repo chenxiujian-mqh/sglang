@@ -1,5 +1,5 @@
 {
-    "name": "sglang",
+    "name": "sglang-v2v2",
     "build": {
         "dockerfile": "Dockerfile"
     },
