@@ -55,11 +55,15 @@ jobs:
 
             # === 3. Navigate to project ===
             cd sgl-model-gateway
+
+            # === 4. 更新 lock 文件 ===
             cargo update
+
+            # === 5. 验证构建 ===
             cargo build --locked
 
-            # === 4. Vendor ===
-            cargo install cargo-vendor
+            # === 6. Vendor（使用内置命令）===
+            mkdir -p .cargo
             cargo vendor > .cargo/config.toml
 
             # === 7. Create output directory ===
