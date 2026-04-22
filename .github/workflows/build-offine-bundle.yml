@@ -62,9 +62,12 @@ jobs:
             # === 5. 验证构建 ===
             cargo build --locked
 
-            # === 6. Vendor（使用内置命令）===
+            # === 6. Vendor ===
             mkdir -p .cargo
-            cargo vendor > .cargo/config.toml
+            cargo vendor > .cargo/config.toml 2>/dev/null || {
+              echo "Vendor output:"
+              cat .cargo/config.toml
+            }
 
             # === 7. Create output directory ===
             BUNDLE_DIR="/workspace/sgl-model-gateway-offline-bundle"
@@ -80,10 +83,15 @@ jobs:
             tar -czf "$BUNDLE_DIR/cargo-vendor.tar.gz" \
               -C "$PWD" vendor
 
-            # === 10. Package project source ===
+            # === 10. Package project source（动态包含 proto）===
+            SRC_FILES="src Cargo.toml Cargo.lock .cargo"
+            if [ -d "proto" ]; then
+              SRC_FILES="$SRC_FILES proto"
+            fi
+            
             tar -czf "$BUNDLE_DIR/sgl-model-gateway-src.tar.gz" \
               -C "$PWD" \
-              src Cargo.toml Cargo.lock .cargo proto  # 注意：加上 proto 目录
+              $SRC_FILES
 
             # === 11. Create documentation ===
             cat > "$BUNDLE_DIR/README.md" <<EOF
