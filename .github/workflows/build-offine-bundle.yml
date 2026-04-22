@@ -26,7 +26,16 @@ jobs:
             set -e
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
-            apt-get install -y curl wget git build-essential pkg-config libssl-dev python3 python3-pip ca-certificates tar gzip
+
+            # === 关键修复：安装 gcc-10 替代默认 gcc-9 ===
+            apt-get install -y curl wget git build-essential pkg-config libssl-dev \
+              python3 python3-pip ca-certificates tar gzip \
+              gcc-10 g++-10
+
+            update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
+            update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
+            export CC=gcc-10
+            export CXX=g++-10
 
             # === 2. Install Rust ===
             curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal
@@ -38,13 +47,13 @@ jobs:
             # === 3. Navigate to project ===
             cd sgl-model-gateway
 
-            # === 关键修复：先更新 Cargo.lock ===
+            # === 4. 更新 lock 文件 ===
             cargo update
 
-            # === 4. 验证构建并生成 lock ===
+            # === 5. 验证构建 ===
             cargo build --locked
 
-            # === 5. Vendor all dependencies ===
+            # === 6. Vendor ===
             cargo install cargo-vendor
             cargo vendor > .cargo/config.toml
 
