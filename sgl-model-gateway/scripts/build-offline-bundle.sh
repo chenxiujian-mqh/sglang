@@ -1,11 +1,13 @@
-  #!/bin/bash  
+#!/bin/bash  
 set -e  
 export DEBIAN_FRONTEND=noninteractive  
   
-# 启用 universe 仓库（ubuntu:20.04 镜像默认不包含）  
-sed -i 's/focal main restricted/focal main restricted universe/g' /etc/apt/sources.list  
-sed -i 's/focal-updates main restricted/focal-updates main restricted universe/g' /etc/apt/sources.list  
-sed -i 's/focal-security main restricted/focal-security main restricted universe/g' /etc/apt/sources.list  
+# 直接覆盖 sources.list，启用 main/restricted/universe/multiverse  
+cat > /etc/apt/sources.list << 'EOF'  
+deb http://archive.ubuntu.com/ubuntu focal main restricted universe multiverse  
+deb http://archive.ubuntu.com/ubuntu focal-updates main restricted universe multiverse  
+deb http://security.ubuntu.com/ubuntu focal-security main restricted universe multiverse  
+EOF  
   
 apt-get update  
   
