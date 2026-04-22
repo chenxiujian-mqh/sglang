@@ -27,13 +27,20 @@ jobs:
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
 
-            # === 安装系统依赖（含 gcc-10 和 protoc）===
+            # === 安装系统依赖（含 unzip，不含 protobuf-compiler）===
             apt-get install -y curl wget git build-essential pkg-config libssl-dev \
-              python3 python3-pip ca-certificates tar gzip \
-              gcc-10 g++-10 \
-              protobuf-compiler
+              python3 python3-pip ca-certificates tar gzip unzip \
+              gcc-10 g++-10
 
-            # 设置 gcc-10 为默认
+            # === 安装新版 protoc ===
+            PROTOC_VERSION=3.20.1
+            curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip
+            unzip protoc-${PROTOC_VERSION}-linux-x86_64.zip -d /usr/local
+            rm protoc-${PROTOC_VERSION}-linux-x86_64.zip
+            export PATH="/usr/local/bin:$PATH"
+            protoc --version
+
+            # 设置 gcc-10
             update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100
             update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100
             export CC=gcc-10
@@ -48,14 +55,10 @@ jobs:
 
             # === 3. Navigate to project ===
             cd sgl-model-gateway
-
-            # === 4. 更新 lock 文件 ===
             cargo update
-
-            # === 5. 验证构建 ===
             cargo build --locked
 
-            # === 6. Vendor ===
+            # === 4. Vendor ===
             cargo install cargo-vendor
             cargo vendor > .cargo/config.toml
 
