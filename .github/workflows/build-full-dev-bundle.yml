@@ -172,8 +172,8 @@ jobs:
           echo "Extracting development tools..."  
           mkdir -p "$HOME/.cargo/bin"  
           tar -xzf cargo-dev-tools.tar.gz -C "$HOME/.cargo/bin"  
-          chmod +x "$HOME/.cargo/bin/rust-analyzer"  
           chmod +x "$HOME/.cargo/bin/cargo-watch"  
+          ln -sf "$HOME/.rustup/toolchains/1.90.0-x86_64-unknown-linux-gnu/bin/rust-analyzer" "$HOME/.cargo/bin/rust-analyzer" 
   
           echo ""  
           echo "Development environment ready!"  
