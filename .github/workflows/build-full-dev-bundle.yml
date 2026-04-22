@@ -24,12 +24,8 @@ jobs:
           export DEBIAN_FRONTEND=noninteractive  
           apt-get update  
   
-          # === 安装系统依赖 ===  
-          apt-get install -y curl wget git build-essential pkg-config libssl-dev \  
-            python3 python3-pip ca-certificates tar gzip unzip \  
-            gcc-10 g++-10 perl cmake  
+          apt-get install -y curl wget git build-essential pkg-config libssl-dev python3 python3-pip ca-certificates tar gzip unzip gcc-10 g++-10 perl cmake  
   
-          # === 安装新版 protoc ===  
           PROTOC_VERSION=3.20.1  
           curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip  
           unzip protoc-${PROTOC_VERSION}-linux-x86_64.zip -d /usr/local  
@@ -37,67 +33,47 @@ jobs:
           export PATH="/usr/local/bin:$PATH"  
           protoc --version  
   
-          # 设置 gcc-10  
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100  
           update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100  
           export CC=gcc-10  
           export CXX=g++-10  
   
-          # === 安装 Rust ===  
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal  
           source "$HOME/.cargo/env"  
           rustup toolchain install 1.90.0 --profile minimal  
           rustup toolchain install nightly --profile minimal  
           rustup default 1.90.0  
   
-          # === 进入项目 ===  
           cd sgl-model-gateway  
   
-          # === 更新 lock 文件 ===  
           cargo update  
   
-          # === 验证构建（使用 vendored-openssl）===  
           cargo build --locked --features vendored-openssl  
   
-          # === Vendor 依赖（追加而不是覆盖）===  
           mkdir -p .cargo  
           if [ -f .cargo/config.toml ]; then  
             cp .cargo/config.toml .cargo/config.toml.bak  
           fi  
           cargo vendor >> .cargo/config.toml  
   
-          # === 安装开发工具 ===  
           cargo install rust-analyzer --locked  
           cargo install cargo-watch --locked  
   
-          # === 创建输出目录 ===  
           BUNDLE_DIR="/workspace/sgl-model-gateway-offline-bundle"  
           mkdir -p "$BUNDLE_DIR/docs"  
   
-          # === 打包 Rust 工具链 ===  
-          tar -czf "$BUNDLE_DIR/rust-toolchain.tar.gz" \  
-            -C "$HOME/.rustup/toolchains" \  
-            1.90.0-x86_64-unknown-linux-gnu \  
-            nightly-x86_64-unknown-linux-gnu  
+          tar -czf "$BUNDLE_DIR/rust-toolchain.tar.gz" -C "$HOME/.rustup/toolchains" 1.90.0-x86_64-unknown-linux-gnu nightly-x86_64-unknown-linux-gnu  
   
-          # === 打包 vendor 依赖 ===  
-          tar -czf "$BUNDLE_DIR/cargo-vendor.tar.gz" \  
-            -C "$PWD" vendor  
+          tar -czf "$BUNDLE_DIR/cargo-vendor.tar.gz" -C "$PWD" vendor  
   
-          # === 打包项目源码 ===  
           SRC_FILES="src Cargo.toml Cargo.lock .cargo"  
           if [ -d "proto" ]; then  
             SRC_FILES="$SRC_FILES proto"  
           fi  
-          tar -czf "$BUNDLE_DIR/sgl-model-gateway-src.tar.gz" \  
-            -C "$PWD" $SRC_FILES  
+          tar -czf "$BUNDLE_DIR/sgl-model-gateway-src.tar.gz" -C "$PWD" $SRC_FILES  
   
-          # === 打包开发工具 ===  
-          tar -czf "$BUNDLE_DIR/cargo-dev-tools.tar.gz" \  
-            -C "$HOME/.cargo/bin" \  
-            rust-analyzer cargo-watch  
+          tar -czf "$BUNDLE_DIR/cargo-dev-tools.tar.gz" -C "$HOME/.cargo/bin" rust-analyzer cargo-watch  
   
-          # === 生成文档 ===  
           cat > "$BUNDLE_DIR/README.md" << 'EOF'  
           # sgl-model-gateway Offline Development Bundle  
           Contents:  
@@ -126,7 +102,6 @@ jobs:
             chmod +x setup-dev.sh && ./setup-dev.sh  
           EOF  
   
-          # === 生成 setup-offline.sh ===  
           cat > "$BUNDLE_DIR/setup-offline.sh" << 'SETUP_EOF'  
           #!/bin/bash  
           set -e  
@@ -142,8 +117,7 @@ jobs:
           fi  
   
           sudo apt-get update || true  
-          sudo apt-get install -y build-essential pkg-config libssl-dev \  
-            gcc-10 g++-10 perl cmake  
+          sudo apt-get install -y build-essential pkg-config libssl-dev gcc-10 g++-10 perl cmake  
   
           update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100  
           update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100  
@@ -156,7 +130,6 @@ jobs:
   
           mkdir -p "$HOME/.cargo/bin"  
   
-          # rustup stub that supports 'rustup run nightly ...'  
           cat > "$HOME/.cargo/bin/rustup" << 'RUSTUP_EOF'  
           #!/bin/bash  
           if [ "$1" = "run" ] && [ "$2" = "nightly" ]; then  
@@ -189,7 +162,6 @@ jobs:
           echo "Done! Binary at: target/release/sgl-model-gateway"  
           SETUP_EOF  
   
-          # === 生成 setup-dev.sh ===  
           cat > "$BUNDLE_DIR/setup-dev.sh" << 'DEV_EOF'  
           #!/bin/bash  
           set -e  
@@ -218,8 +190,7 @@ jobs:
           chmod +x /tmp/build-bundle.sh  
   
       - name: Build and run Ubuntu 20.04 container to prepare offline bundle  
-        run: |  
-          docker run --rm -v "$PWD:/workspace" -v "/tmp/build-bundle.sh:/build-bundle.sh" -w /workspace ubuntu:20.04 bash /build-bundle.sh
+        run: docker run --rm -v "$PWD:/workspace" -v "/tmp/build-bundle.sh:/build-bundle.sh" -w /workspace ubuntu:20.04 bash /build-bundle.sh  
   
       - name: Upload offline bundle as artifact  
         uses: actions/upload-artifact@v4  
