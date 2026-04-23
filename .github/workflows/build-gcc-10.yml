@@ -1,0 +1,134 @@
+name: Build GCC-10 Offline Bundle  
+  
+on:  
+  workflow_dispatch:  
+  
+jobs:  
+  build-gcc10-bundle:  
+    runs-on: ubuntu-latest  
+  
+    steps:  
+      - name: Checkout code  
+        uses: actions/checkout@v4  
+  
+      - name: Set up Docker  
+        run: |  
+          sudo systemctl start docker  
+          docker --version  
+  
+      - name: Create output directory  
+        run: mkdir -p gcc10-offline  
+  
+      - name: Download GCC-10 packages in Ubuntu 20.04 container  
+        run: |  
+          docker run --rm \  
+            -v "$PWD/gcc10-offline:/gcc10-offline" \  
+            ubuntu:20.04 bash -c "  
+              export DEBIAN_FRONTEND=noninteractive  
+              apt-get update  
+              cd /gcc10-offline  
+              apt download gcc-10 g++-10 \  
+                gcc-10-base libgcc-10-dev libstdc++-10-dev \  
+                cpp-10 libgomp1 libatomic1 libasan6 libubsan1  
+              echo 'Downloaded packages:'  
+              ls -lh /gcc10-offline/  
+            "  
+  
+      - name: Create install script  
+        run: |  
+          cat > gcc10-offline/install-gcc10.sh << 'EOF'  
+          #!/bin/bash  
+          set -e  
+          SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  
+  
+          echo "=== GCC-10 Offline Installer ==="  
+          echo ""  
+  
+          if [ "$EUID" -ne 0 ]; then  
+            echo "Error: This script must be run as root."  
+            echo "Usage: sudo bash install-gcc10.sh"  
+            exit 1  
+          fi  
+  
+          cd "$SCRIPT_DIR"  
+  
+          echo "Installing deb packages (first pass)..."  
+          dpkg -i *.deb 2>&1 || {  
+            echo "First pass had dependency ordering issues, retrying..."  
+            dpkg -i *.deb  
+          }  
+  
+          echo ""  
+          echo "Setting up compiler alternatives..."  
+          update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100  
+          update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100  
+          update-alternatives --install /usr/bin/cc cc /usr/bin/gcc-10 100  
+          update-alternatives --install /usr/bin/c++ c++ /usr/bin/g++-10 100  
+  
+          echo ""  
+          echo "=== Verifying Installation ==="  
+          PASS=0  
+          FAIL=0  
+  
+          if gcc-10 --version > /dev/null 2>&1; then  
+            echo "[PASS] gcc-10: $(gcc-10 --version | head -1)"  
+            PASS=$((PASS+1))  
+          else  
+            echo "[FAIL] gcc-10 not found"  
+            FAIL=$((FAIL+1))  
+          fi  
+  
+          if g++-10 --version > /dev/null 2>&1; then  
+            echo "[PASS] g++-10: $(g++-10 --version | head -1)"  
+            PASS=$((PASS+1))  
+          else  
+            echo "[FAIL] g++-10 not found"  
+            FAIL=$((FAIL+1))  
+          fi  
+  
+          if gcc --version > /dev/null 2>&1; then  
+            echo "[PASS] gcc (default): $(gcc --version | head -1)"  
+            PASS=$((PASS+1))  
+          else  
+            echo "[FAIL] gcc (default) not found"  
+            FAIL=$((FAIL+1))  
+          fi  
+  
+          echo 'int main(){return 0;}' > /tmp/_gcc_test.c  
+          if gcc -o /tmp/_gcc_test /tmp/_gcc_test.c 2>/dev/null; then  
+            echo "[PASS] Compile test passed"  
+            PASS=$((PASS+1))  
+            rm -f /tmp/_gcc_test /tmp/_gcc_test.c  
+          else  
+            echo "[FAIL] Compile test failed"  
+            FAIL=$((FAIL+1))  
+          fi  
+  
+          echo ""  
+          echo "Results: $PASS passed, $FAIL failed"  
+  
+          if [ $FAIL -eq 0 ]; then  
+            echo ""  
+            echo "GCC-10 installation successful!"  
+            echo ""  
+            echo "To manually verify:"  
+            echo "  gcc --version"  
+            echo "  g++ --version"  
+            echo "  echo 'int main(){return 0;}' | gcc -x c - -o /tmp/test && echo 'Compile OK'"  
+          else  
+            echo ""  
+            echo "Installation may have issues. Please check the errors above."  
+            exit 1  
+          fi  
+          EOF  
+          chmod +x gcc10-offline/install-gcc10.sh  
+  
+      - name: List bundle contents  
+        run: ls -lh gcc10-offline/  
+  
+      - name: Upload GCC-10 offline bundle as artifact  
+        uses: actions/upload-artifact@v4  
+        with:  
+          name: gcc10-offline-bundle  
+          path: gcc10-offline/  
+          retention-days: 7
