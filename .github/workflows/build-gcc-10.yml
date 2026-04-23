@@ -16,27 +16,25 @@ jobs:
           sudo systemctl start docker  
           docker --version  
   
-      - name: Create output directory  
-        run: mkdir -p gcc10-offline  
-  
-      - name: Download GCC-10 packages in Ubuntu 20.04 container  
+      - name: Write download script  
         run: |  
-          docker run --rm \  
-            -v "$PWD/gcc10-offline:/gcc10-offline" \  
-            ubuntu:20.04 bash -c "  
-              export DEBIAN_FRONTEND=noninteractive  
-              apt-get update  
-              cd /gcc10-offline  
-              apt download gcc-10 g++-10 \  
-                gcc-10-base libgcc-10-dev libstdc++-10-dev \  
-                cpp-10 libgomp1 libatomic1 libasan6 libubsan1  
-              echo 'Downloaded packages:'  
-              ls -lh /gcc10-offline/  
-            "  
+          cat > /tmp/download-gcc10.sh << 'OUTER_EOF'  
+          #!/bin/bash  
+          set -e  
+          export DEBIAN_FRONTEND=noninteractive  
+          apt-get update  
   
-      - name: Create install script  
-        run: |  
-          cat > gcc10-offline/install-gcc10.sh << 'EOF'  
+          BUNDLE_DIR="/workspace/gcc10-offline"  
+          mkdir -p "$BUNDLE_DIR"  
+          cd "$BUNDLE_DIR"  
+  
+          echo "Downloading GCC-10 packages..."  
+          apt download gcc-10 g++-10 gcc-10-base libgcc-10-dev libstdc++-10-dev cpp-10 libgomp1 libatomic1 libasan6 libubsan1  
+  
+          echo "Downloaded packages:"  
+          ls -lh "$BUNDLE_DIR/"  
+  
+          cat > "$BUNDLE_DIR/install-gcc10.sh" << 'INSTALL_EOF'  
           #!/bin/bash  
           set -e  
           SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"  
@@ -120,11 +118,16 @@ jobs:
             echo "Installation may have issues. Please check the errors above."  
             exit 1  
           fi  
-          EOF  
-          chmod +x gcc10-offline/install-gcc10.sh  
+          INSTALL_EOF  
   
-      - name: List bundle contents  
-        run: ls -lh gcc10-offline/  
+          chmod +x "$BUNDLE_DIR/install-gcc10.sh"  
+          echo "Bundle created at: $BUNDLE_DIR"  
+          ls -lh "$BUNDLE_DIR/"  
+          OUTER_EOF  
+          chmod +x /tmp/download-gcc10.sh  
+  
+      - name: Download GCC-10 packages in Ubuntu 20.04 container  
+        run: docker run --rm -v "$PWD:/workspace" -v "/tmp/download-gcc10.sh:/download-gcc10.sh" -w /workspace ubuntu:20.04 bash /download-gcc10.sh  
   
       - name: Upload GCC-10 offline bundle as artifact  
         uses: actions/upload-artifact@v4  
